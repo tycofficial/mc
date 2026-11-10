@@ -1,0 +1,17 @@
+#game-canvas{position:fixed;inset:0;width:100%;height:100%;display:block;outline:none;touch-action:none}
+#damage-flash{position:fixed;inset:0;z-index:8;pointer-events:none;opacity:0;box-shadow:inset 0 0 140px 40px #c9162180}
+#damage-flash.hit{animation:ouch .5s ease-out}@keyframes ouch{0%{opacity:1}100%{opacity:0}}
+#water-overlay{position:fixed;inset:0;background:#185b9b55;pointer-events:none;z-index:4;display:none}
+#fallback-controls{position:fixed;left:16px;bottom:110px;max-width:calc(100vw - 32px);background:#152016bd;color:#f1efde;border-left:3px solid #9bb46f;padding:8px 12px;font:12px/1.6 sans-serif;text-shadow:1px 1px #000;z-index:9;pointer-events:none}
+#chat-box{position:fixed;left:18px;bottom:110px;width:min(620px,90vw);z-index:55;font:16px monospace;color:white;text-shadow:1px 2px #000}
+#chat-box .chat-history{white-space:pre-wrap;background:#0008;padding:10px;max-height:220px;overflow:auto;line-height:1.7;pointer-events:none}
+#chat-box input{width:100%;box-sizing:border-box;border:2px solid #bfc2ba;background:#111d;color:white;padding:12px;font:16px monospace;outline:none;margin-top:5px}
+#touch-controls{position:fixed;inset:0;z-index:11;pointer-events:none;display:none;user-select:none}
+#touch-controls button{pointer-events:auto;position:absolute;background:#0006;color:white;border:2px solid #fff6;min-width:54px;height:54px;font:bold 20px monospace;touch-action:none}
+#touch-controls button:active{background:#fff5}
+#touch-controls [data-key=KeyW]{left:80px;bottom:165px}#touch-controls [data-key=KeyS]{left:80px;bottom:55px}#touch-controls [data-key=KeyA]{left:25px;bottom:110px}#touch-controls [data-key=KeyD]{left:135px;bottom:110px}
+#touch-controls [data-key=Space]{right:28px;bottom:90px}#touch-controls [data-key=ShiftLeft]{right:28px;bottom:28px}
+#touch-controls [data-action=mine]{right:100px;bottom:160px}#touch-controls [data-action=place]{right:25px;bottom:220px}
+#touch-controls [data-action=inventory]{right:25px;top:20px}#touch-controls [data-action=pause]{right:90px;top:20px}
+.fatal-error{position:fixed;inset:0;display:grid;place-content:center;background:#242c24;color:#eee;padding:30px;font:18px/1.8 sans-serif;text-align:center;z-index:1000}
+@media(max-width:650px){#chat-box{bottom:180px;font-size:12px}#touch-controls button{min-width:44px;height:44px}}
