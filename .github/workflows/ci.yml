@@ -8,7 +8,7 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -19,13 +19,17 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps --no-shell chromium
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: browser-verification
-          path: .qa/*.png
+          path: |
+            .qa/*.png
+            .qa/*.json
+            .qa/*-trace.zip
+          include-hidden-files: true
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:

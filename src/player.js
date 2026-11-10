@@ -10,12 +10,17 @@ export class Player {
     this.grounded=false; this.flying=false; this.inWater=false; this.underwater=false;
     this.crouching=false; this.sprinting=false; this.distance=0; this.bob=0;
     this.fallStart=this.position.y; this.damageCooldown=0; this.exhaustion=0; this.regenTimer=0;
-    this.starveTimer=0; this.drownTimer=0; this.lastSpace=-1; this.onDamage=()=>{};
+    this.starveTimer=0; this.drownTimer=0; this.lastSpace=-1; this.jumpRequested=false; this.onDamage=()=>{};
     this.onStep=()=>{}; this.stepDistance=0; this.settings={sensitivity:1,bob:true,fov:75};
     this.syncCamera();
   }
   look(dx,dy) { const s=.0021*this.settings.sensitivity; this.yaw-=dx*s; this.pitch=Math.max(-Math.PI/2+.01,Math.min(Math.PI/2-.01,this.pitch-dy*s)); }
-  jumpPress(now) { if(this.mode==='creative' && now-this.lastSpace<.28) {this.flying=!this.flying;this.velocity.set(0,0,0);} this.lastSpace=now; }
+  jumpPress(now) {
+    const toggleFlight=this.mode==='creative'&&now-this.lastSpace<.28;
+    if(toggleFlight){this.flying=!this.flying;this.velocity.set(0,0,0);}
+    this.jumpRequested=!toggleFlight;
+    this.lastSpace=toggleFlight?-1:now;
+  }
   bounds(position=this.position) {return {minX:position.x-RADIUS,maxX:position.x+RADIUS,minY:position.y,maxY:position.y+(this.crouching?1.5:HEIGHT),minZ:position.z-RADIUS,maxZ:position.z+RADIUS};}
   intersectsBlock(x,y,z) {const a=this.bounds();return a.minX<x+1&&a.maxX>x&&a.minY<y+1&&a.maxY>y&&a.minZ<z+1&&a.maxZ>z;}
   collides(position) {
@@ -47,7 +52,7 @@ export class Player {
     }
     this.velocity[axis]=0;
   }
-  update(dt,keys) {
+  update(dt,keys,movement) {
     dt=Number.isFinite(dt)?Math.max(0,Math.min(dt,.05)):0; this.damageCooldown=Math.max(0,this.damageCooldown-dt);
     const feetId=this.world.getBlock(Math.floor(this.position.x),Math.floor(this.position.y+.6),Math.floor(this.position.z));
     this.inWater=feetId===B.WATER;
@@ -56,18 +61,20 @@ export class Player {
     this.crouching=(keys.has('ShiftLeft')||keys.has('ShiftRight'))&&!this.flying;
     if(wasCrouching&&!this.crouching&&this.collides(this.position))this.crouching=true;
     this.sprinting=(keys.has('ControlLeft')||keys.has('ControlRight'))&&!this.crouching&&this.hunger>6;
-    let forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));
-    let strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));
-    const len=Math.hypot(forward,strafe)||1;forward/=len;strafe/=len;
+    let forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'))+(movement?.y||0);
+    let strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'))+(movement?.x||0);
+    const len=Math.max(1,Math.hypot(forward,strafe));forward/=len;strafe/=len;
     const speed=this.flying?(this.sprinting?20:10):this.inWater?2.7:this.crouching?1.4:this.sprinting?5.8:4.3;
     const tx=(strafe*Math.cos(this.yaw)-forward*Math.sin(this.yaw))*speed;
     const tz=(-strafe*Math.sin(this.yaw)-forward*Math.cos(this.yaw))*speed;
     const blend=1-Math.exp(-dt*(this.grounded?18:this.inWater?8:7));
     this.velocity.x+=(tx-this.velocity.x)*blend;this.velocity.z+=(tz-this.velocity.z)*blend;
     if(this.flying&&this.mode!=='creative')this.flying=false;
-    if(this.flying) {this.velocity.y=(Number(keys.has('Space'))-Number(keys.has('ShiftLeft')||keys.has('ShiftRight')))*speed;this.fallStart=this.position.y;}
-    else if(this.inWater){this.velocity.y-=5*dt;this.velocity.y*=Math.exp(-3*dt);if(keys.has('Space'))this.velocity.y=3.6;this.fallStart=this.position.y;}
-    else {if(this.grounded&&keys.has('Space')){this.velocity.y=8.2;this.grounded=false;this.exhaustion+=.08;}this.velocity.y=Math.max(-45,this.velocity.y-24*dt);}
+    const jump=keys.has('Space')||this.jumpRequested;
+    this.jumpRequested=false;
+    if(this.flying) {this.velocity.y=(Number(jump)-Number(keys.has('ShiftLeft')||keys.has('ShiftRight')))*speed;this.fallStart=this.position.y;}
+    else if(this.inWater){this.velocity.y-=5*dt;this.velocity.y*=Math.exp(-3*dt);if(jump)this.velocity.y=3.6;this.fallStart=this.position.y;}
+    else {if(this.grounded&&jump){this.velocity.y=8.2;this.grounded=false;this.exhaustion+=.08;}this.velocity.y=Math.max(-45,this.velocity.y-24*dt);}
     const oldX=this.position.x,oldZ=this.position.z;
     const steps=Math.max(1,Math.ceil(this.velocity.length()*dt/.22));
     this.grounded=false;

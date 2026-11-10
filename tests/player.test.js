@@ -66,3 +66,21 @@ test('invalid damage and food cannot poison health or hunger',()=>{
   assert.equal(p.eat(-2),false);assert.equal(p.eat(Infinity),false);assert.equal(p.hunger,10);
   assert.equal(p.eat(4),true);assert.equal(p.hunger,14);
 });
+
+test('a partly tilted joystick walks slower than a fully tilted joystick',()=>{
+  const half=playerAt(),full=playerAt();
+  for(let i=0;i<60;i++){
+    half.update(1/60,emptyKeys,{x:0,y:.5});
+    full.update(1/60,emptyKeys,{x:0,y:1});
+  }
+  assert.ok(full.position.z < -2);
+  assert.ok(Math.abs((.5-half.position.z)*2-(.5-full.position.z))<.02);
+});
+
+test('a touch jump that ends before the next frame still jumps',()=>{
+  const p=playerAt();run(p,.1);
+  p.jumpPress(10);
+  p.update(1/60,emptyKeys);
+  assert.ok(p.position.y>1.1);
+  assert.equal(p.jumpRequested,false);
+});

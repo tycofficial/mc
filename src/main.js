@@ -12,6 +12,7 @@ import { Inventory, Furnace, Chest } from './inventory.js';
 import { UI } from './ui.js';
 import { SaveStore, makeWorldMeta, validateSave } from './storage.js';
 import { Visuals } from './visuals.js';
+import { TouchControls } from './touch.js';
 
 const canvas=document.querySelector('#game-canvas');
 const store=new SaveStore();
@@ -20,11 +21,13 @@ const audio=new GameAudio();audio.setVolume(settings.volume);
 let renderer,scene,camera,world,environment,entities,player,visuals,inventory,meta;
 let active=false,loading=false,locked=false,touchActive=false,saveElapsed=0,uiElapsed=0,hudElapsed=0,frameCount=0,fpsElapsed=0,fps=60;
 let mining=null,mouseDown=false,placeDown=false,placeCooldown=0,attackCooldown=0,hit=null,debug=settings.debug,lastTime=performance.now(),suppressUnlock=false;
-let fallbackControls=false,lockPending=false,lookDrag=null,lockTimer;
+let fallbackControls=false,lockPending=false,dragPress=null,lockTimer;
+const DRAG_THRESHOLD=5, HOLD_TO_MINE_MS=180;
 const keys=new Set(),furnaces=new Map(),chests=new Map(),fuses=[];
 const direction=new THREE.Vector3();
-const mobile=matchMedia('(pointer: coarse)').matches;
-const ui=new UI({settings,getIcon,callbacks:{
+const touchMovement={x:0,y:0};
+const mobile=TouchControls.isSupported();
+const ui=new UI({settings,getIcon,touch:mobile,callbacks:{
   onCreate:options=>startWorld(makeWorldMeta(options)),
   onLoad:id=>{try{startWorld(store.read(id));}catch(error){ui.toast(error.message);}},
   onDelete:id=>{store.delete(id);ui.showWorlds(store.list());},
@@ -38,7 +41,7 @@ const ui=new UI({settings,getIcon,callbacks:{
 function fatal(error){console.error(error);const e=document.createElement('div');e.className='fatal-error';const title=document.createElement('h1');title.textContent='世界暂时无法启动';const message=document.createElement('p');message.textContent=error.message||String(error);const hint=document.createElement('p');hint.textContent='请使用支持 WebGL 2 的现代浏览器并开启硬件加速，然后刷新页面。';e.append(title,message,hint);document.body.append(e);}
 try{
   renderer=new THREE.WebGLRenderer({canvas,antialias:false,powerPreference:'high-performance'});
-  renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;
+  renderer.setPixelRatio(Math.min(devicePixelRatio,mobile?1.25:1.6));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;
   renderer.toneMapping=THREE.NoToneMapping;renderer.setClearColor(0x8fc4eb);renderer.autoClear=false;
   scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(settings.fov,innerWidth/innerHeight,.05,700);
   const atlas=createTextureAtlas();
@@ -48,17 +51,28 @@ try{
   requestAnimationFrame(frame);
 }catch(error){fatal(error);}
 
-function releasePointer(){keys.clear();mouseDown=placeDown=false;mining=null;lookDrag=null;clearTimeout(lockTimer);lockPending=false;if(document.pointerLockElement){suppressUnlock=true;document.exitPointerLock();}locked=false;touchActive=false;updateTouch();}
+function clearDrag(){
+  const id=dragPress?.id;
+  dragPress=null;
+  if(id!==undefined&&canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);
+}
+function releasePointer(){
+  keys.clear();mouseDown=placeDown=false;mining=null;clearDrag();
+  if(player)player.jumpRequested=false;
+  clearTimeout(lockTimer);lockPending=false;
+  if(document.pointerLockElement){suppressUnlock=true;document.exitPointerLock();}
+  locked=false;touchActive=false;touchControls.setActive(false);
+}
 function enableFallback(){
-  if(!active||player.health<=0)return;lockPending=false;locked=false;
+  if(!active||mobile||player.health<=0)return;
+  clearTimeout(lockTimer);lockPending=false;locked=false;
   const first=!fallbackControls;fallbackControls=true;
-  if(ui.menu==='pause')ui.hideMenus();
-  if(first)ui.toast('已启用兼容操作：Alt＋左键拖动视角，WASD 移动，Esc 暂停。');
+  if(first)ui.toast('直接按住左键拖动视角。长按不动挖掘，右键放置。');
 }
 async function lockPointer(){
   if(!active||player.health<=0)return;audio.unlock();
-  if(mobile){touchActive=true;updateTouch();return;}
-  if(fallbackControls)return;
+  if(mobile){touchActive=true;touchControls.setActive(true);return;}
+  if(fallbackControls||locked||lockPending)return;
   lockPending=true;
   // Embedded browsers may reject, throw, or silently ignore Pointer Lock. None should trap the player in a menu.
   lockTimer=setTimeout(()=>{if(!document.pointerLockElement&&active&&!ui.isOpen)enableFallback();},700);
@@ -158,10 +172,17 @@ function breakBlock(target){
   const container=furnaces.get(key)||chests.get(key);if(container){for(const s of container.slots)if(s)visuals.drop(s.id,s.count,new THREE.Vector3(x+.5,y+.4,z+.5),s.durability);furnaces.delete(key);chests.delete(key);}
   settle(x,y+1,z);mining=null;
 }
-function updateMining(dt){
-  if(!mouseDown){mining=null;return;}
+function tryAttack(selected=ITEMS[inventory.selectedItem?.id]){
+  if(attackCooldown>0||!entities.hit(camera.position,direction,Math.min(hit?.distance??4,4),selected?.attack||1))return false;
+  visuals.swingHand();audio.play('hit');attackCooldown=.45;mining=null;
+  if(player.mode==='survival'&&selected?.tool)inventory.damageSelected(1);
+  return true;
+}
+function updateMining(dt,now){
+  const holdingStill=dragPress&&!dragPress.moved&&now-dragPress.started>=HOLD_TO_MINE_MS;
+  if(!mouseDown&&!holdingStill){mining=null;return;}
   const selected=ITEMS[inventory.selectedItem?.id];
-  if(attackCooldown<=0&&entities.hit(camera.position,direction,Math.min(hit?.distance??4,4),selected?.attack||1)){visuals.swingHand();audio.play('hit');attackCooldown=.45;if(player.mode==='survival'&&selected?.tool)inventory.damageSelected(1);mining=null;return;}
+  if(tryAttack(selected))return;
   if(!hit||attackCooldown>0)return;
   if(fuses.some(f=>f.x===hit.x&&f.y===hit.y&&f.z===hit.z))return;
   const b=BLOCKS[hit.id];if(!b||b.liquid||(!Number.isFinite(b.hardness)&&!(player.mode==='creative'&&hit.id===B.BEDROCK)))return;
@@ -188,10 +209,13 @@ function frame(now){
   frameCount++;fpsElapsed+=dt;if(fpsElapsed>=.5){fps=Math.round(frameCount/fpsElapsed);frameCount=0;fpsElapsed=0;}
   const playing=active&&!ui.isOpen&&!chat.open&&(locked||touchActive||fallbackControls)&&player.health>0;
   fallbackHint.hidden=!(active&&fallbackControls&&!ui.isOpen&&!chat.open);
+  canvas.classList.toggle('drag-look',playing&&fallbackControls);
+  canvas.classList.toggle('dragging-look',!!dragPress?.moved);
   if(active){
     if(playing){
-      world.ensureAround(player.position.x,player.position.z,0);player.update(dt,keys);if(player.position.y<-10&&player.mode==='creative')respawn();camera.getWorldDirection(direction);hit=world.raycast(camera.position,direction,player.mode==='creative'?7:4.5);
-      placeCooldown=Math.max(0,placeCooldown-dt);attackCooldown=Math.max(0,attackCooldown-dt);updateMining(dt);if(placeDown)interact();
+      world.ensureAround(player.position.x,player.position.z,0);player.update(dt,keys,mobile?touchMovement:undefined);if(player.position.y<-10&&player.mode==='creative')respawn();camera.getWorldDirection(direction);hit=world.raycast(camera.position,direction,player.mode==='creative'?7:4.5);
+      if(touchActive)touchControls.setFlying(player.flying);
+      placeCooldown=Math.max(0,placeCooldown-dt);attackCooldown=Math.max(0,attackCooldown-dt);updateMining(dt,now);if(placeDown)interact();
       environment.update(dt,player.position,{underwater:player.underwater});entities.update(dt,player.position,{mode:player.mode,daylight:environment.daylight});
       visuals.setHeld(inventory.selectedItem?.id||0);visuals.update(dt,player,world,inventory,audio);visuals.target(hit,mining?.progress||0);
       for(let i=fuses.length-1;i>=0;i--){fuses[i].time-=dt;if(fuses[i].time<=0){const fuse=fuses.splice(i,1)[0];explode(fuse);}}
@@ -211,19 +235,44 @@ function frame(now){
 
 document.addEventListener('pointerlockchange',()=>{
   locked=document.pointerLockElement===canvas;
-  if(locked){lockPending=false;fallbackControls=false;clearTimeout(lockTimer);suppressUnlock=false;}
+  if(locked){lockPending=false;fallbackControls=false;clearDrag();clearTimeout(lockTimer);suppressUnlock=false;}
   else{keys.clear();mouseDown=placeDown=false;mining=null;if(suppressUnlock){suppressUnlock=false;return;}if(lockPending){if(active&&!ui.isOpen)enableFallback();return;}if(active&&!ui.isOpen&&!chat.open&&!fallbackControls){ui.showPause();saveGame();}}
 });
-document.addEventListener('pointerlockerror',()=>{if(active&&!ui.isOpen)enableFallback();});
+document.addEventListener('pointerlockerror',()=>{if(lockPending&&active&&!ui.isOpen)enableFallback();});
 canvas.addEventListener('click',()=>{if(active&&!ui.isOpen&&!locked&&!mobile&&!chat.open)lockPointer();});
-document.addEventListener('mousemove',e=>{if(!active||ui.isOpen)return;if(locked)player.look(e.movementX,e.movementY);else if(fallbackControls&&lookDrag){player.look(e.clientX-lookDrag.x,e.clientY-lookDrag.y);lookDrag={x:e.clientX,y:e.clientY};}});
-document.addEventListener('mousedown',e=>{if(e.target.closest?.('[data-hotbar]')||!active||ui.isOpen||chat.open||(!locked&&!touchActive&&!fallbackControls))return;if(fallbackControls&&e.button===0&&e.altKey){e.preventDefault();lookDrag={x:e.clientX,y:e.clientY};mouseDown=false;return;}if(e.button===0){mouseDown=true;audio.unlock();}if(e.button===2){placeDown=true;interact();}if(e.button===1)pickBlock();});
-document.addEventListener('mouseup',e=>{if(e.button===0){mouseDown=false;lookDrag=null;}if(e.button===2)placeDown=false;});
+document.addEventListener('mousemove',e=>{if(active&&locked&&!ui.isOpen)player.look(e.movementX,e.movementY);});
+document.addEventListener('mousedown',e=>{
+  if(mobile||e.target.closest?.('[data-hotbar]')||!active||ui.isOpen||chat.open||(!locked&&!fallbackControls))return;
+  if(e.button===0&&locked){mouseDown=true;audio.unlock();if(!tryAttack())visuals.swingHand();}
+  if(e.button===2){placeDown=true;interact();}
+  if(e.button===1){e.preventDefault();pickBlock();}
+});
+document.addEventListener('mouseup',e=>{if(e.button===0&&!mobile)mouseDown=false;if(e.button===2)placeDown=false;});
+canvas.addEventListener('pointerdown',e=>{
+  if(mobile||!fallbackControls||!active||ui.isOpen||chat.open||e.button!==0)return;
+  e.preventDefault();audio.unlock();
+  dragPress={id:e.pointerId,x:e.clientX,y:e.clientY,started:performance.now(),moved:false};
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove',e=>{
+  if(dragPress?.id!==e.pointerId)return;
+  const dx=e.clientX-dragPress.x,dy=e.clientY-dragPress.y;
+  if(!dragPress.moved&&Math.hypot(dx,dy)<DRAG_THRESHOLD)return;
+  dragPress.moved=true;mining=null;
+  player.look(dx*1.95,dy*1.95);
+  dragPress.x=e.clientX;dragPress.y=e.clientY;
+});
+canvas.addEventListener('pointerup',e=>{
+  if(dragPress?.id!==e.pointerId)return;
+  const click=!dragPress.moved&&performance.now()-dragPress.started<HOLD_TO_MINE_MS;
+  clearDrag();
+  if(click&&!tryAttack())visuals.swingHand();
+});
+for(const type of ['pointercancel','lostpointercapture'])canvas.addEventListener(type,e=>{if(dragPress?.id===e.pointerId)clearDrag();});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 document.addEventListener('wheel',e=>{if(active&&!ui.isOpen&&!chat.open){e.preventDefault();select(inventory.selected+Math.sign(e.deltaY));}},{passive:false});
 document.addEventListener('keydown',e=>{
   if(chat.open)return;
-  if(active&&fallbackControls&&(e.code==='AltLeft'||e.code==='AltRight')){e.preventDefault();return;}
   if(active&&e.code==='Escape'){
     e.preventDefault();
     if(['inventory','creative','crafting','furnace','chest'].includes(ui.menu))closeInventory();
@@ -252,19 +301,17 @@ window.addEventListener('beforeunload',()=>saveGame());
 window.addEventListener('resize',()=>{if(!renderer)return;renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();});
 
 const waterOverlay=document.createElement('div');waterOverlay.id='water-overlay';document.body.append(waterOverlay);
-const fallbackHint=document.createElement('div');fallbackHint.id='fallback-controls';fallbackHint.hidden=true;fallbackHint.textContent='兼容操作 · Alt＋左键拖动视角 · WASD 移动 · Esc 暂停';document.body.append(fallbackHint);
-const touch=document.createElement('div');touch.id='touch-controls';
-touch.innerHTML='<button data-key="KeyW" aria-label="前进">▲</button><button data-key="KeyA" aria-label="左移">◀</button><button data-key="KeyS" aria-label="后退">▼</button><button data-key="KeyD" aria-label="右移">▶</button><button data-key="Space">跳</button><button data-key="ShiftLeft">潜</button><button data-action="mine">挖</button><button data-action="place">放</button><button data-action="inventory">背包</button><button data-action="pause">Ⅱ</button>';
-document.body.append(touch);
-function updateTouch(){touch.style.display=mobile&&active&&!ui.isOpen&&touchActive?'block':'none';}
-for(const button of touch.querySelectorAll('button')){
-  button.addEventListener('pointerdown',e=>{e.preventDefault();button.setPointerCapture(e.pointerId);const key=button.dataset.key,action=button.dataset.action;if(key){keys.add(key);if(key==='Space')player.jumpPress(performance.now()/1000);}if(action==='mine')mouseDown=true;if(action==='place'){placeDown=true;interact();}if(action==='inventory'){openInventory();updateTouch();}if(action==='pause'){pause();updateTouch();}});
-  const release=()=>{if(button.dataset.key)keys.delete(button.dataset.key);if(button.dataset.action==='mine')mouseDown=false;if(button.dataset.action==='place')placeDown=false;};button.addEventListener('pointerup',release);button.addEventListener('pointercancel',release);
-}
-let touchLook=null;
-canvas.addEventListener('pointerdown',e=>{if(mobile&&active&&!ui.isOpen){touchLook={id:e.pointerId,x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);}});
-canvas.addEventListener('pointermove',e=>{if(touchLook?.id===e.pointerId){player.look((e.clientX-touchLook.x)*1.6,(e.clientY-touchLook.y)*1.6);touchLook.x=e.clientX;touchLook.y=e.clientY;}});
-canvas.addEventListener('pointerup',()=>touchLook=null);canvas.addEventListener('pointercancel',()=>touchLook=null);
+const fallbackHint=document.createElement('div');fallbackHint.id='fallback-controls';fallbackHint.hidden=true;fallbackHint.textContent='左键拖动视角 · 长按不动挖掘 · 右键放置 · WASD 移动';document.body.append(fallbackHint);
+const touchControls=new TouchControls(canvas,{
+  look:(dx,dy)=>player?.look(dx*2.25,dy*2.25),
+  move:(x,y)=>{touchMovement.x=x;touchMovement.y=y;},
+  key:(code,pressed)=>pressed?keys.add(code):keys.delete(code),
+  jump:()=>player?.jumpPress(performance.now()/1000),
+  mine:pressed=>{mouseDown=pressed;if(pressed&&!tryAttack())visuals.swingHand();},
+  place:pressed=>{placeDown=pressed;if(pressed)interact();},
+  inventory:()=>openInventory(),
+  pause,
+});
 
 const chat={open:false,lines:[],element:document.createElement('div'),show(initial=''){
   releasePointer();this.open=true;this.element.style.display='block';this.input.value=initial;this.input.focus();this.render();

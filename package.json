@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
-    "test:e2e": "node scripts/browser-smoke.mjs"
+    "test:e2e": "node scripts/browser-smoke.mjs",
+    "package:pages": "npm run build && node scripts/package-pages.mjs"
   },
   "dependencies": {
     "three": "^0.181.0"

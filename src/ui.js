@@ -7,8 +7,9 @@ const clone = stack => stack ? { ...stack } : null;
 const DEFAULT_SETTINGS = { volume: .35, sensitivity: 1, renderDistance: 4, fov: 75, bob: true, debug: false };
 
 export class UI {
-  constructor({ callbacks = {}, getIcon = () => '', settings = {} } = {}) {
+  constructor({ callbacks = {}, getIcon = () => '', settings = {}, touch = false } = {}) {
     this.callbacks = callbacks; this.getIcon = getIcon;
+    this.touch = touch;
     this.settings = { ...DEFAULT_SETTINGS, ...settings };
     this.root = document.querySelector('#ui');
     this.root.innerHTML = '<div id="hud" hidden></div><div id="menu-layer"></div><div id="toast-stack" aria-live="polite"></div><div id="item-tooltip"></div><div id="cursor-item"></div>';
@@ -60,6 +61,7 @@ export class UI {
   }
   button(text, id, cls = '') { return `<button class="mc-button ${cls}" data-action="${id}">${text}</button>`; }
   setMenu(name, content, cls = '') {
+    this.activeSlotTouch = null;
     this.menu = name; this.layer.className = `menu-layer ${cls}`; this.layer.innerHTML = content;
     this.layer.hidden = false; this.root.classList.add('has-menu');
     this.tooltip.classList.remove('visible');
@@ -110,8 +112,8 @@ export class UI {
     this.bind({ done: () => back === 'title' ? this.showTitle() : this.showPause(), reset: () => { this.settings = { ...DEFAULT_SETTINGS }; this.callbacks.onSettings?.({ ...this.settings }); this.showSettings(back); } });
   }
   showHelp(back = 'title') {
-    const rows = [['W A S D', '移动'], ['鼠标', '转动视角'], ['Alt + 左键拖动', '转动视角（内嵌预览兼容模式）'], ['空格', '跳跃 / 水中上浮'], ['Shift', '潜行 / 飞行下降'], ['Ctrl', '疾跑'], ['鼠标左键（按住）', '挖掘方块 / 攻击生物'], ['鼠标右键', '放置 / 使用 / 打开工作台'], ['E', '背包、合成与创造物品栏'], ['1 – 9 / 滚轮', '切换快捷栏'], ['Q', '丢出一个物品'], ['F', '食用手持食物'], ['空格 × 2', '创造模式飞行开关'], ['F3', '坐标与性能信息'], ['F4', '切换游戏模式'], ['T / /', '聊天与指令'], ['Esc', '暂停 / 返回']];
-    this.setMenu('help', `<main class="screen-panel help-screen"><h1>操作指南</h1><div class="help-columns"><div><h2>键盘与鼠标</h2><dl>${rows.map(([key, label]) => `<div><dt><kbd>${key}</kbd></dt><dd>${label}</dd></div>`).join('')}</dl></div><div class="help-tips"><h2>第一天的冒险</h2><ol><li>按住左键收集树木。</li><li>按 E，把原木合成为木板。</li><li>用四块木板合成工作台。</li><li>放置工作台，右键打开 3 × 3 合成。</li><li>制作木镐，开采石头与煤炭。</li><li>建造庇护所，制作火把，迎接夜晚。</li></ol><h2>背包操作</h2><p>左键拿取或放置整组；右键拿取一半或放置一个。Shift + 点击快速转移物品。点击配方可自动放入材料。</p><p>熔炉上格放入矿石或食物，下格放入煤炭或木材，等待烧炼。创造模式背包可以直接获取所有物品。</p><h2>内嵌预览兼容模式</h2><p>如果预览窗口不允许锁定鼠标，游戏会自动启用兼容模式，仍可正常移动、挖掘和建造。按住 Alt 并用左键拖动来转动视角；松开后，左键继续用于挖掘。按 Esc 打开菜单，再点击“回到游戏”继续。</p><p class="muted">按 Esc 释放鼠标。建议使用桌面浏览器和键盘鼠标游玩。</p></div></div>${this.button('返回', 'back')}</main>`, back === 'title' ? 'dirt-backdrop' : 'paused');
+    const rows = [['W A S D', '移动'], ['鼠标', '转动视角'], ['左键拖动', '内嵌预览转动视角'], ['空格', '跳跃 / 水中上浮'], ['Shift', '潜行 / 飞行下降'], ['Ctrl', '疾跑'], ['鼠标左键（按住）', '挖掘方块 / 攻击生物'], ['鼠标右键', '放置 / 使用 / 打开工作台'], ['E', '背包、合成与创造物品栏'], ['1 – 9 / 滚轮', '切换快捷栏'], ['Q', '丢出一个物品'], ['F', '食用手持食物'], ['空格 × 2', '创造模式飞行开关'], ['F3', '坐标与性能信息'], ['F4', '切换游戏模式'], ['T / /', '聊天与指令'], ['Esc', '暂停 / 返回']];
+    this.setMenu('help', `<main class="screen-panel help-screen"><h1>操作指南</h1><div class="help-columns"><div><h2>键盘与鼠标</h2><dl>${rows.map(([key, label]) => `<div><dt><kbd>${key}</kbd></dt><dd>${label}</dd></div>`).join('')}</dl></div><div class="help-tips"><h2>第一天的冒险</h2><ol><li>按住左键收集树木。</li><li>按 E，把原木合成为木板。</li><li>用四块木板合成工作台。</li><li>放置工作台，右键打开 3 × 3 合成。</li><li>制作木镐，开采石头与煤炭。</li><li>建造庇护所，制作火把，迎接夜晚。</li></ol><h2>背包操作</h2><p>左键拿取或放置整组；右键拿取一半或放置一个。Shift + 点击快速转移物品。点击配方可自动放入材料。</p><p>熔炉上格放入矿石或食物，下格放入煤炭或木材，等待烧炼。创造模式背包可以直接获取所有物品。</p><h2>内嵌预览兼容模式</h2><p>如果预览窗口不允许锁定鼠标，游戏会自动启用兼容模式，仍可正常移动、挖掘和建造。按住左键直接拖动视角。短按攻击，长按不动挖掘，右键放置。按 Esc 打开菜单，再点击“回到游戏”继续。</p><h2>触屏操作</h2><p>推动左下摇杆移动，在场景空白处滑动视角。右侧按钮用于跳跃、潜行、挖掘和放置。点按背包格拿取或放下整组，长按拆分或放入一个。</p></div></div>${this.button('返回', 'back')}</main>`, back === 'title' ? 'dirt-backdrop' : 'paused');
     this.bind({ back: () => back === 'title' ? this.showTitle() : this.showPause() });
   }
   showDeath() { this.setMenu('death', `<main class="death-panel"><h1>你失败了！</h1><p>一次新的冒险，正等待着你。</p>${this.button('重生', 'respawn', 'primary')}${this.button('标题画面', 'quit')}</main>`, 'death-backdrop'); this.bind({ respawn: () => this.callbacks.onRespawn?.(), quit: () => this.callbacks.onQuit?.() }); }
@@ -131,7 +133,7 @@ export class UI {
     const targetId = typeof s.target === 'number' ? s.target : s.target?.id;
     const targetName = typeof s.target === 'string' ? s.target : ITEMS[targetId]?.name;
     const pos = s.position || {};
-    this.hud.innerHTML = `<div class="crosshair"><i></i><b></b></div>${targetName ? `<div class="target-label">${escape(targetName)}</div>` : ''}<div class="mining-progress ${(s.mining || 0) > 0 ? 'active' : ''}"><i style="width:${Math.max(0, Math.min(100, (s.mining || 0) * 100))}%"></i></div><div class="game-hint">${s.mode === 'creative' ? `创造模式${s.flying ? ' · 飞行中' : ''}` : '生存模式'}<span>E 背包　Esc 菜单</span></div>${s.debug ? `<div class="debug-info">MC · 方块世界<br>${Math.round(s.fps || 0)} FPS<br>XYZ: ${Number(pos.x || 0).toFixed(2)} / ${Number(pos.y || 0).toFixed(2)} / ${Number(pos.z || 0).toFixed(2)}<br>生物群系：${escape(s.biome || '平原')}<br>${escape(s.time || '')}</div>` : ''}<div class="hotbar-area"><div class="held-name">${item ? escape(item.name) : ''}</div>${s.mode !== 'creative' ? `${oxygen}<div class="vitals"><div class="hearts">${hearts}</div><div class="hunger">${food}</div></div><div class="xp-track"><i style="width:${((s.xp || 0) % 10) * 10}%"></i><span>${Math.floor((s.xp || 0) / 10) || ''}</span></div>` : ''}<div class="hotbar">${inv.slots.slice(0, 9).map((stack, i) => `<button class="slot hotbar-slot ${inv.selected === i ? 'selected' : ''}" data-hotbar="${i}" aria-label="快捷栏 ${i + 1}${stack ? ` ${escape(ITEMS[stack.id]?.name)}` : ''}">${this.itemHTML(stack, i + 1)}</button>`).join('')}</div></div>`;
+    this.hud.innerHTML = `<div class="crosshair"><i></i><b></b></div>${targetName ? `<div class="target-label">${escape(targetName)}</div>` : ''}<div class="mining-progress ${(s.mining || 0) > 0 ? 'active' : ''}"><i style="width:${Math.max(0, Math.min(100, (s.mining || 0) * 100))}%"></i></div><div class="game-hint">${s.mode === 'creative' ? `创造模式${s.flying ? ' · 飞行中' : ''}` : '生存模式'}<span>${this.touch ? '摇杆移动　滑动视角' : 'E 背包　Esc 菜单'}</span></div>${s.debug ? `<div class="debug-info">MC · 方块世界<br>${Math.round(s.fps || 0)} FPS<br>XYZ: ${Number(pos.x || 0).toFixed(2)} / ${Number(pos.y || 0).toFixed(2)} / ${Number(pos.z || 0).toFixed(2)}<br>生物群系：${escape(s.biome || '平原')}<br>${escape(s.time || '')}</div>` : ''}<div class="hotbar-area"><div class="held-name">${item ? escape(item.name) : ''}</div>${s.mode !== 'creative' ? `${oxygen}<div class="vitals"><div class="hearts">${hearts}</div><div class="hunger">${food}</div></div><div class="xp-track"><i style="width:${((s.xp || 0) % 10) * 10}%"></i><span>${Math.floor((s.xp || 0) / 10) || ''}</span></div>` : ''}<div class="hotbar">${inv.slots.slice(0, 9).map((stack, i) => `<button class="slot hotbar-slot ${inv.selected === i ? 'selected' : ''}" data-hotbar="${i}" aria-label="快捷栏 ${i + 1}${stack ? ` ${escape(ITEMS[stack.id]?.name)}` : ''}">${this.itemHTML(stack, i + 1)}</button>`).join('')}</div></div>`;
     this.hud.querySelectorAll('[data-hotbar]').forEach(b => b.onclick = () => { inv.select(Number(b.dataset.hotbar)); this.callbacks.onSelectSlot?.(inv.selected); this.updateHUD(); });
   }
   showInventory(inventory, kind = 'inventory', extra = {}) {
@@ -143,7 +145,8 @@ export class UI {
   }
   slotHTML(stack, source, index, cls = '') { return `<button class="slot ${cls}" data-source="${source}" data-index="${index}" data-item-name="${escape(ITEMS[stack?.id]?.name || '')}" aria-label="${escape(ITEMS[stack?.id]?.name || '空格子')}${stack ? ` ${stack.count}` : ''}">${this.itemHTML(stack)}</button>`; }
   renderInventory() {
-    if (!this.inventory) return;
+    if (!this.inventory || this.activeSlotTouch) return;
+    const scrollTop = this.layer.querySelector('.creative-catalog')?.scrollTop || 0;
     const inv = this.inventory, kind = this.inventoryKind;
     const creative = inv.mode === 'creative' && kind === 'inventory';
     const title = creative ? '创造模式物品栏' : { inventory: '物品栏', crafting: '工作台', furnace: '熔炉', chest: '箱子' }[kind] || '物品栏';
@@ -161,11 +164,30 @@ export class UI {
       top = `<div class="crafting-area">${kind === 'inventory' ? '<div class="player-preview"><div class="pixel-player"><i class="head"></i><i class="body"></i><i class="arm left"></i><i class="arm right"></i><i class="leg left"></i><i class="leg right"></i></div></div>' : ''}<div class="craft-input"><span class="inventory-label">合成</span><div class="craft-grid" style="--craft-size:${this.craftSize}">${this.craftGrid.map((s, i) => this.slotHTML(s, 'craft', i)).join('')}</div></div><span class="craft-arrow">➜</span>${this.slotHTML(result, 'result', 0, 'result-slot')}<button class="recipe-toggle ${this.recipeOpen ? 'active' : ''}" data-action="recipes" title="配方书">▤</button></div>`;
     }
     const recipes = this.recipeOpen && !creative && !['furnace', 'chest'].includes(kind) ? `<aside class="recipe-book"><h3>配方书</h3><p>点击配方自动放入材料</p><div class="recipe-list">${RECIPES.filter(r => r.size <= this.craftSize).map(r => `<button class="recipe-entry" data-recipe="${r.id}"><img src="${this.icon(r.result.id)}" alt=""><span>${r.name}</span><small>×${r.result.count}</small></button>`).join('')}</div></aside>` : '';
-    this.setMenu(kind, `<div class="inventory-layout">${recipes}<main class="inventory-panel ${creative ? 'creative-panel' : ''}"><div class="inventory-heading"><h2>${title}</h2><button class="close-button" data-action="close" aria-label="关闭物品栏">×</button></div>${top}<div class="inventory-label backpack-label">物品栏</div><div class="slot-grid backpack-grid">${inv.slots.slice(9).map((s, i) => this.slotHTML(s, 'inventory', i + 9)).join('')}</div><div class="slot-grid inventory-hotbar">${inv.slots.slice(0, 9).map((s, i) => this.slotHTML(s, 'inventory', i, inv.selected === i ? 'chosen' : '')).join('')}</div><p class="inventory-tip">左键：拿取 / 放置　右键：拆分 / 单个放置　Shift：快速转移</p></main></div>`, 'inventory-backdrop');
+    this.setMenu(kind, `<div class="inventory-layout">${recipes}<main class="inventory-panel ${creative ? 'creative-panel' : ''}"><div class="inventory-heading"><h2>${title}</h2><button class="close-button" data-action="close" aria-label="关闭物品栏">×</button></div>${top}<div class="inventory-label backpack-label">物品栏</div><div class="slot-grid backpack-grid">${inv.slots.slice(9).map((s, i) => this.slotHTML(s, 'inventory', i + 9)).join('')}</div><div class="slot-grid inventory-hotbar">${inv.slots.slice(0, 9).map((s, i) => this.slotHTML(s, 'inventory', i, inv.selected === i ? 'chosen' : '')).join('')}</div><p class="inventory-tip">${this.touch ? '点按拿取或放置整组　长按拆分或放一个' : '左键：拿取 / 放置　右键：拆分 / 单个放置　Shift：快速转移'}</p></main></div>`, 'inventory-backdrop');
     this.bind({ close: () => this.callbacks.onInventoryClose?.(), recipes: () => { this.recipeOpen = !this.recipeOpen; this.renderInventory(); } });
-    this.layer.querySelectorAll('[data-source]').forEach(el => el.onpointerdown = event => {
-      event.preventDefault(); if (event.button !== 0 && event.button !== 2) return;
-      this.slotClick(el.dataset.source, Number(el.dataset.index), event.button === 2, event.shiftKey);
+    const catalog = this.layer.querySelector('.creative-catalog');
+    if (catalog) catalog.scrollTop = scrollTop;
+    this.layer.querySelectorAll('[data-source]').forEach(el => {
+      const useSlot = (right, shift) => this.slotClick(el.dataset.source, Number(el.dataset.index), right, shift);
+      el.onpointerdown = event => {
+        if (event.pointerType === 'touch') {
+          this.activeSlotTouch = { id: event.pointerId, x: event.clientX, y: event.clientY, time: event.timeStamp };
+          return;
+        }
+        event.preventDefault();
+        if (event.button === 0 || event.button === 2) useSlot(event.button === 2, event.shiftKey);
+      };
+      el.onpointerup = event => {
+        const start = this.activeSlotTouch;
+        if (start?.id !== event.pointerId) return;
+        this.activeSlotTouch = null;
+        if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) return;
+        this.cursorEl.style.left = `${Math.min(event.clientX + 12, innerWidth - 40)}px`;
+        this.cursorEl.style.top = `${Math.min(event.clientY + 12, innerHeight - 40)}px`;
+        useSlot(event.timeStamp - start.time >= 420, false);
+      };
+      el.onpointercancel = event => { if (this.activeSlotTouch?.id === event.pointerId) this.activeSlotTouch = null; };
     });
     this.layer.querySelectorAll('[data-recipe]').forEach(el => el.onclick = () => this.fillRecipe(el.dataset.recipe));
     this.layer.querySelectorAll('[data-category]').forEach(el => el.onclick = () => { this.category = el.dataset.category; this.renderInventory(); });
